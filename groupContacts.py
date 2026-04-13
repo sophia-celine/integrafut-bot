@@ -11,8 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
-GROUP_NAME = "Integrafut AZUL"
-# GROUP_NAME = "Integrafut AMARELO 💛⚽"
+GROUP_NAME = "CO Integrafut"
 
 options = webdriver.ChromeOptions()
 options.debugger_address = "127.0.0.1:9222"
@@ -22,11 +21,13 @@ wait = WebDriverWait(driver, 20)
 
 # Só navega se não estiver no WhatsApp Web para evitar o refresh desnecessário
 if "web.whatsapp.com" not in driver.current_url.lower():
+    print("Navegando para o WhatsApp Web...")
     driver.get("https://web.whatsapp.com")
 
 # ===== Search for group =====
 try:
     # O HTML fornecido mostra um <input role="textbox">. 
+    print(f"Pesquisando pelo grupo: {GROUP_NAME}...")
     # O seletor abaixo aceita tanto o novo formato (input) quanto o antigo (div).
     search_box_xpath = '//input[@role="textbox"] | //div[@role="textbox"]'
     search_box = wait.until(EC.element_to_be_clickable((By.XPATH, search_box_xpath)))
@@ -38,12 +39,14 @@ try:
     search_box.send_keys(GROUP_NAME)
     search_box.send_keys(Keys.ENTER)
 except TimeoutException:
-    print("Não foi possível encontrar a caixa de pesquisa. Verifique se o WhatsApp Web carregou corretamente.")
+    print("ERRO: Não foi possível encontrar a caixa de pesquisa. Verifique se o WhatsApp Web carregou corretamente.")
     driver.quit()
     exit()
 
 # ===== Open group info =====
 # Aguarda o cabeçalho da conversa carregar com o nome do grupo antes de clicar
+print("Grupo selecionado. Abrindo informações do grupo...")
+
 # Focamos no header dentro de 'main' para não clicar no header da lista de contatos
 header_xpath = '//div[@id="main"]//header'
 group_header = wait.until(EC.element_to_be_clickable((By.XPATH, header_xpath)))
@@ -54,6 +57,7 @@ wait.until(EC.presence_of_element_located((By.XPATH, '//*[@role="region"] | //se
 time.sleep(2) # Tempo extra para carregar a lista de participantes
 
 # ===== Expand list if "View all" button exists =====
+print("Verificando se a lista de participantes precisa ser expandida...")
 try:
     # Localiza o painel lateral primeiro para restringir a busca
     sidebar = driver.find_element(By.XPATH, '//*[@role="region"] | //section')
@@ -63,6 +67,7 @@ try:
     view_all_xpath = './/div[@role="button"][.//span[@data-icon="chevron"]][not(contains(., "criptografia"))][descendant::*[contains(text(), "mais") or contains(text(), "Ver tudo")]]'
     
     # Rola a sidebar para baixo para garantir que o botão seja carregado e visível
+    print("Rolando painel lateral para encontrar botão de expansão...")
     driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", sidebar)
     time.sleep(1.5)
 
@@ -81,19 +86,21 @@ IGNORE_NAMES = ["Você", "Admin do grupo", "Olá! Eu estou usando o WhatsApp."]
 print("Coletando participantes...")
 
 while True:
-    # 1. Identifica o container ativo e o alvo do scroll
+    # 1. Identifica qual container contém de fato a lista de participantes
+    modals = driver.find_elements(By.XPATH, '//div[@role="dialog"]')
+
     try:
-        # Se o modal (janela expandida) estiver aberto
-        active_container = driver.find_element(By.XPATH, '//div[@role="dialog"]')
-        # No modal, o scroll acontece no div com tabindex="-1"
+        active_container = driver.find_element(By.XPATH, '//*[@role="region"] | //section')
+        print("  -> Coletando da barra lateral...")
+    except NoSuchElementException:
+        print("  -> ERRO: Container de contatos não encontrado!")
+        break
+
+    # Identifica o alvo do scroll (div com tabindex -1 dentro do container ativo)
+    try:
         scroll_target = active_container.find_element(By.XPATH, './/div[@tabindex="-1"]')
     except NoSuchElementException:
-        # Caso contrário, usa a barra lateral
-        active_container = driver.find_element(By.XPATH, '//*[@role="region"] | //section')
-        try:
-            scroll_target = active_container.find_element(By.XPATH, './/div[@tabindex="-1"]')
-        except:
-            scroll_target = active_container
+        scroll_target = active_container
 
     # 2. Captura os elementos de nome
     # Removemos filtros de classe CSS que podem mudar e buscamos spans com dir="auto"
@@ -104,12 +111,10 @@ while True:
 
     for el in elements:
         name = el.text.strip()
-        # Critérios de validação:
-        # - Não ser vazio
-        # - Não estar na lista de ignorados
-        # - Ter mais de 1 caractere (evita ícones perdidos)
         if name and name not in IGNORE_NAMES and not name.startswith("visto por último") and len(name) > 1:
-            participants.add(name)
+            if name not in participants:
+                print(f"      [+] Encontrado: {name}")
+                participants.add(name)
 
     # 3. Executa o scroll no container correto
     # Usamos scrollTop para garantir que o WhatsApp carregue os próximos itens da lista virtual
@@ -127,5 +132,5 @@ while True:
 # ===== Save CSV =====
 df = pd.DataFrame(sorted(participants), columns=["Name"])
 df.to_csv(f"data/group_contacts_{GROUP_NAME}.csv", index=False)
-
-print(f"Saved {len(participants)} contacts.")
+print("--------------------------------------")
+print(f"Sucesso! {len(participants)} contatos salvos em data/group_contacts_{GROUP_NAME}.csv")
