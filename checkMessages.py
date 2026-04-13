@@ -6,31 +6,29 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # ===== CONFIGURAÇÕES =====
-GROUP_NAME = "CO Integrafut"
+GROUP_NAME = "Gugu Integrafut 2026"
 # Caminho para o arquivo .zip exportado do WhatsApp
-CHAT_ZIP = f"data/Conversa do WhatsApp com CO Integrafut 2026.zip"
-CONTACTS_CSV = f"data/group_contacts_{GROUP_NAME}.csv"
-OUTPUT_REPORT = f"data/relatorio_final_{GROUP_NAME.replace(' ', '_')}.txt"
+CHAT_ZIP = f"data/Conversa do WhatsApp com {GROUP_NAME}.zip"
+OUTPUT_REPORT = f"data/relatorio_pontuacao_{GROUP_NAME.replace(' ', '_')}.txt"
+LOG_POINTS_FILE = f"data/log_pontos_{GROUP_NAME.replace(' ', '_')}.txt"
 
-TARGET_MESSAGE = "okk"  # Mensagem a ser contada
-DAYS_LIMIT = 7          # 0 para apenas hoje, 7 para última semana
+# Configurações de Regex
+CHALLENGE_PATTERN = re.compile(r'DESAFIO (DO GUGU GERAL|MUSICAL)', re.IGNORECASE)
+POINT_PATTERN = re.compile(r'(\d+(?:[.,]\d+)?)\s+ponto\s+(azul|amarelo)', re.IGNORECASE)
+# Regex para capturar o Timestamp completo, Remetente e Conteúdo
+MSG_PATTERN = re.compile(r'^\[?(\d{2}/\d{2}/\d{4}[,\s]\s*\d{2}:\d{2})\]?\s*-\s*([^:]+):\s*(.*)$')
+
+DAYS_LIMIT = 7          # Período de análise ampliado para cobrir a competição
 # =========================
 
-def load_target_names(csv_path):
-    print(f"Lendo contatos de {csv_path}...")
-    df_contacts = pd.read_csv(CONTACTS_CSV)
-    return set(df_contacts['Name'].str.lower().unique())
 
 def parse_chat_file():
-    target_names = load_target_names(CONTACTS_CSV)
-    cutoff_date = datetime.now().date() - timedelta(days=DAYS_LIMIT)
+    cutoff_date = datetime.now().date() - timedelta(days=DAYS_LIMIT) 
     
-    # Regex para o formato padrão do WhatsApp: "DD/MM/YYYY HH:MM - Nome: Mensagem"
-    # ou "[HH:MM, DD/MM/YYYY] Nome: Mensagem" (depende da exportação)
-    pattern = re.compile(r'^\[?(\d{2}/\d{2}/\d{4})[,\s]\s*\d{2}:\d{2}\]?\s*-\s*([^:]+):\s*(.*)$')
-    
-    match_count = 0
-    individual_counts = {}
+    # Estrutura de dados simplificada: { "DESAFIO": { "azul": 0.0, "amarelo": 0.0 } }
+    results = {}
+    current_challenge = None
+    last_msg_ts = "Nenhuma mensagem encontrada"
     log_entries = []
 
     if not os.path.exists(CHAT_ZIP):
@@ -41,61 +39,118 @@ def parse_chat_file():
 
     try:
         with zipfile.ZipFile(CHAT_ZIP, 'r') as z:
-            # Localiza o arquivo de texto dentro do zip (geralmente _chat.txt)
             txt_files = [f for f in z.namelist() if f.endswith('.txt')]
             if not txt_files:
                 print("ERRO: Nenhum arquivo de texto (.txt) encontrado dentro do ZIP.")
                 return
             
             with z.open(txt_files[0]) as f_bytes:
-                # Usa TextIOWrapper para ler os bytes como string utf-8
-                with io.TextIOWrapper(f_bytes, encoding='utf-8') as file:
+                with io.TextIOWrapper(f_bytes, encoding='utf-8') as file, \
+                     open(LOG_POINTS_FILE, "w", encoding="utf-8") as log_file:
+                    
+                    current_msg_text = ""
+                    current_ts = ""
+                    current_raw_lines = []
+
+                    def flush_message():
+                        """Processa a mensagem acumulada antes de iniciar uma nova ou fechar o arquivo."""
+                        nonlocal current_challenge, current_msg_text, current_ts, current_raw_lines, last_msg_ts
+                        if not current_msg_text or not current_challenge:
+                            return
+
+                        points_found = POINT_PATTERN.findall(current_msg_text)
+                        if points_found:
+                            last_msg_ts = current_ts
+                            for pts_str, team in points_found:
+                                pts_val = float(pts_str.replace(',', '.'))
+                                team_lower = team.lower()
+                                results[current_challenge][team_lower] += pts_val
+                                results[current_challenge]["itens"] += 1
+                                log_entries.append(f"[{current_ts}] {current_challenge}: {pts_val} pts para {team_lower}")
+                                print(f"  [+] {current_challenge}: +{pts_val} {team_lower}")
+                            
+                            # Salva todas as linhas originais da mensagem no log
+                            log_file.write("\n".join(current_raw_lines) + "\n")
+                        
+                        # Limpa o buffer
+                        current_msg_text, current_ts, current_raw_lines = "", "", []
+
                     for line in file:
-                        match = pattern.match(line.strip())
+                        clean_line = line.strip()
+                        if not clean_line: continue
+                        
+                        match = MSG_PATTERN.match(clean_line)
                         if match:
-                            date_str, sender, message = match.groups()
+                            flush_message() # Processa a mensagem anterior
+                            timestamp_str, sender, message = match.groups()
+                            
                             try:
-                                msg_date = datetime.strptime(date_str, '%d/%m/%Y').date()
+                                msg_date = datetime.strptime(timestamp_str[:10], '%d/%m/%Y').date()
                             except ValueError:
+                                current_msg_text, current_ts, current_raw_lines = "", "", []
+                                continue
+                            
+                            if msg_date < cutoff_date:
+                                current_msg_text, current_ts, current_raw_lines = "", "", []
                                 continue
 
-                            # Filtro de Data
-                            if msg_date >= cutoff_date:
-                                # Filtro de Remetente (presente no CSV)
-                                if sender.lower() in target_names:
-                                    # Filtro de Mensagem
-                                    if TARGET_MESSAGE.lower() in message.lower():
-                                        match_count += 1
-                                        individual_counts[sender] = individual_counts.get(sender, 0) + 1
-                                        log_entries.append(f"[{date_str}] {sender}: {message}")
-                                        print(f"  [!] Encontrado: {sender} -> {message}")
+                            challenge_match = CHALLENGE_PATTERN.search(message)
+                            if challenge_match:
+                                current_challenge = f"DESAFIO {challenge_match.group(1).upper()}"
+                                if current_challenge not in results:
+                                    results[current_challenge] = {"azul": 0.0, "amarelo": 0.0, "itens": 0}
+                            elif current_challenge:
+                                # Inicia novo buffer de mensagem
+                                current_msg_text = message
+                                current_ts = timestamp_str
+                                current_raw_lines = [clean_line]
+                        else:
+                            # Se não houver match, é uma continuação da mensagem anterior
+                            if current_ts:
+                                current_msg_text += "\n" + clean_line
+                                current_raw_lines.append(clean_line)
+                    
+                    # Processa a última mensagem do arquivo
+                    flush_message()
+
     except zipfile.BadZipFile:
         print(f"ERRO: O arquivo {CHAT_ZIP} não é um arquivo ZIP válido ou está corrompido.")
         return
 
-    save_report(match_count, individual_counts, log_entries)
+    save_report(results, log_entries, last_msg_ts)
 
-def save_report(total, counts, logs):
+def save_report(results, logs, last_ts):
     periodo = "hoje" if DAYS_LIMIT == 0 else f"últimos {DAYS_LIMIT} dias"
     with open(OUTPUT_REPORT, "w", encoding="utf-8") as f:
         f.write(f"RELATÓRIO DE COMPETIÇÃO - GRUPO: {GROUP_NAME}\n")
-        f.write(f"Mensagem Alvo: '{TARGET_MESSAGE}' | Período: {periodo}\n")
+        f.write(f"Período de análise: {periodo}\n")
+        f.write(f"Última mensagem computada em: {last_ts}\n")
         f.write("-" * 50 + "\n\n")
         
-        f.write("LOG DE OCORRÊNCIAS:\n")
-        for entry in logs:
-            f.write(entry + "\n")
+        total_azul = 0
+        total_amarelo = 0
+        total_itens = 0
+
+        for desafio, scores in results.items():
+            f.write(f"\n=== {desafio} ===\n")
+            f.write(f"Itens computados: {scores['itens']}\n")
+            f.write(f"Pontuação Azul: {scores['azul']}\n")
+            f.write(f"Pontuação Amarela: {scores['amarelo']}\n")
             
-        f.write("\n" + "-" * 50 + "\n")
-        f.write(f"TOTAL GERAL: {total}\n")
-        if counts:
-            f.write("\nRANKING POR PARTICIPANTE:\n")
-            for name, count in sorted(counts.items(), key=lambda x: x[1], reverse=True):
-                f.write(f" - {name}: {count}\n")
+            total_azul += scores['azul']
+            total_amarelo += scores['amarelo']
+            total_itens += scores['itens']
+
+        f.write("\n" + "=" * 50 + "\n")
+        f.write(f"PONTUAÇÃO ATÉ AGORA:\n")
+        f.write(f"EQUIPE AZUL: {total_azul}\n")
+        f.write(f"EQUIPE AMARELA: {total_amarelo}\n")
+        f.write(f"TOTAL DE ITENS VALIDADOS: {total_itens}\n")
 
     print("--------------------------------------")
-    print(f"Análise concluída! {total} mensagens encontradas.")
+    print(f"Análise concluída!")
     print(f"Relatório salvo em: {OUTPUT_REPORT}")
+    print(f"Log de mensagens de pontuação salvo em: {LOG_POINTS_FILE}")
 
 if __name__ == "__main__":
     parse_chat_file()
