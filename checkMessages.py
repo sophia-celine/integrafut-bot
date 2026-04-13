@@ -3,11 +3,11 @@ import os
 import io
 import zipfile
 import time
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+# from selenium import webdriver
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.common.keys import Keys
+# from selenium.webdriver.support.ui import WebDriverWait
+# from selenium.webdriver.support import expected_conditions as EC
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -23,7 +23,7 @@ WHATSAPP_TARGET_GROUP = "Gugu Integrafut 2026" # Grupo onde o relatório será e
 
 # Configurações de Regex
 CHALLENGE_PATTERN = re.compile(r'DESAFIO (DO GUGU GERAL|MUSICAL)', re.IGNORECASE)
-POINT_PATTERN = re.compile(r'(\d+(?:[.,]\d+)?)\s+ponto\s+(azul|amarelo)', re.IGNORECASE)
+POINT_PATTERN = re.compile(r'(\d+(?:[.,]\d+)?)\s+pontos?\s+(azul|amarelo)', re.IGNORECASE)
 # Regex para capturar o Timestamp completo, Remetente e Conteúdo
 MSG_PATTERN = re.compile(r'^\[?(\d{2}/\d{2}/\d{4}[,\s]\s*\d{2}:\d{2})\]?\s*-\s*([^:]+):\s*(.*)$')
 
