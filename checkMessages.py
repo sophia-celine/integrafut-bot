@@ -2,6 +2,12 @@ import re
 import os
 import io
 import zipfile
+import time
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -11,6 +17,9 @@ GROUP_NAME = "Gugu Integrafut 2026"
 CHAT_ZIP = f"data/Conversa do WhatsApp com {GROUP_NAME}.zip"
 OUTPUT_REPORT = f"data/relatorio_pontuacao_{GROUP_NAME.replace(' ', '_')}.txt"
 LOG_POINTS_FILE = f"data/log_pontos_{GROUP_NAME.replace(' ', '_')}.txt"
+
+SEND_TO_WHATSAPP = False  # Flag para enviar o relatório automaticamente via WhatsApp
+WHATSAPP_TARGET_GROUP = "Gugu Integrafut 2026" # Grupo onde o relatório será enviado
 
 # Configurações de Regex
 CHALLENGE_PATTERN = re.compile(r'DESAFIO (DO GUGU GERAL|MUSICAL)', re.IGNORECASE)
@@ -152,5 +161,45 @@ def save_report(results, logs, last_ts):
     print(f"Relatório salvo em: {OUTPUT_REPORT}")
     print(f"Log de mensagens de pontuação salvo em: {LOG_POINTS_FILE}")
 
+def send_whatsapp_report():
+    """Envia o conteúdo do relatório gerado para o grupo especificado no WhatsApp Web."""
+    if not os.path.exists(OUTPUT_REPORT):
+        print("ERRO: Relatório não encontrado para envio.")
+        return
+
+    print(f"Conectando ao WhatsApp para enviar relatório para: {WHATSAPP_TARGET_GROUP}...")
+    try:
+        with open(OUTPUT_REPORT, "r", encoding="utf-8") as f:
+            report_text = f.read()
+
+        options = webdriver.ChromeOptions()
+        options.debugger_address = "127.0.0.1:9222"
+        driver = webdriver.Chrome(options=options)
+        wait = WebDriverWait(driver, 20)
+
+        # Pesquisar o grupo no painel lateral
+        search_xpath = '//div[@id="side"]//div[@role="textbox"]'
+        search_box = wait.until(EC.element_to_be_clickable((By.XPATH, search_xpath)))
+        search_box.click()
+        search_box.send_keys(Keys.CONTROL + "a", Keys.BACKSPACE)
+        search_box.send_keys(WHATSAPP_TARGET_GROUP, Keys.ENTER)
+        time.sleep(2) # Aguarda a conversa carregar
+
+        # Localizar o campo de digitação da mensagem
+        msg_box_xpath = '//footer//div[@role="textbox"][@contenteditable="true"]'
+        msg_box = wait.until(EC.element_to_be_clickable((By.XPATH, msg_box_xpath)))
+        
+        # Envia o texto simulando Shift+Enter para manter as quebras de linha no WhatsApp
+        for line in report_text.split('\n'):
+            msg_box.send_keys(line)
+            msg_box.send_keys(Keys.SHIFT + Keys.ENTER)
+        
+        msg_box.send_keys(Keys.ENTER)
+        print("Relatório enviado com sucesso via WhatsApp!")
+    except Exception as e:
+        print(f"ERRO ao enviar relatório via WhatsApp: {e}")
+
 if __name__ == "__main__":
     parse_chat_file()
+    if SEND_TO_WHATSAPP:
+        send_whatsapp_report()
