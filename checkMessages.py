@@ -34,7 +34,7 @@ POINT_PATTERN = re.compile(r'(\d+(?:[.,]\d+)?)\s+pontos?\s+(azul|amarelo)', re.I
 # 3. \. -> Garante que haja um ponto após o número.
 # 4. (?![0-9]) -> Impede que pegue a parte inteira de decimais (ex: ignora o '1' em '1.5').
 # 5. [\s\u200b\u200c\u200d\u2068\u2069]* -> Aceita espaços e caracteres invisíveis após o ponto.
-ITEM_PATTERN = re.compile(r'(?:^|[\s\*\_\~\u200b\u200c\u200d\u2068\u2069]+)(\d+)\.(?![0-9])[\s\u200b\u200c\u200d\u2068\u2069]*', re.MULTILINE)
+ITEM_PATTERN = re.compile(r'(?:^|[\s\*\_\~\u200b\u200c\u200d\u2068\u2069]+)(M?)(\d+)\.(?![0-9])[\s\u200b\u200c\u200d\u2068\u2069]*', re.MULTILINE | re.IGNORECASE)
 # Regex para capturar o Timestamp completo, Remetente e Conteúdo
 MSG_PATTERN = re.compile(r'^\[?(\d{2}/\d{2}/\d{4}[,\s]\s*\d{2}:\d{2})\]?\s*-\s*([^:]+):\s*(.*)$')
 
@@ -77,21 +77,32 @@ def parse_chat_file():
                     def flush_message():
                         """Processa a mensagem acumulada antes de iniciar uma nova ou fechar o arquivo."""
                         nonlocal current_challenge, current_msg_text, current_ts, current_sender, current_raw_lines, last_msg_ts
-                        if not current_msg_text or not current_challenge:
+                        if not current_msg_text:
+                            return
+
+                        # Detecta mudança de desafio pelo prefixo do item (M ou nada)
+                        items_meta = ITEM_PATTERN.findall(current_msg_text)
+                        if items_meta:
+                            # Usa o último prefixo encontrado na mensagem para definir o modo
+                            last_prefix = items_meta[-1][0].upper()
+                            current_challenge = "DESAFIO MUSICAL" if last_prefix == "M" else "DESAFIO DO GUGU GERAL"
+                            
+                            if current_challenge not in results:
+                                results[current_challenge] = {"azul": 0.0, "amarelo": 0.0, "itens": 0, "seen_numbers": set(), "last_item_number_seen": 0}
+
+                        if not current_challenge:
                             return
 
                         points_found = POINT_PATTERN.findall(current_msg_text)
                         
                         # Contabiliza itens apenas se o remetente estiver na lista de validadores
-                        items_found = []
                         items_found_in_message_count = 0 # Contador para itens validados na mensagem atual
                         if current_sender in VALIDATORS:
-                            nums_found_str = ITEM_PATTERN.findall(current_msg_text)
+                            items_data = ITEM_PATTERN.findall(current_msg_text)
                             
                             challenge_data = results[current_challenge]
                             processed_nums_in_current_message = set() # Para evitar avisos duplicados na mesma mensagem
-
-                            for num_str in nums_found_str:
+                            for prefix, num_str in items_data:
                                 num = int(num_str)
                                 
                                 # Check for repetition within the current message for warning purposes

@@ -108,6 +108,7 @@
 
     const CHALLENGE_PATTERN = /DESAFIO (DO GUGU GERAL|MUSICAL)/i;
     const POINT_PATTERN = /(\d+(?:[.,]\d+)?)\s+pontos?\s+(azul|amarelo)/gi;
+    const ITEM_PATTERN = /(?:^|[\s\*\_\~\u200b\u200c\u200d\u2068\u2069]+)(M?)(\d+)\.(?![0-9])[\s\u200b\u200c\u200d\u2068\u2069]*/gim;
     const MSG_PATTERN = /^\[?(\d{2}\/\d{2}\/\d{4}[,\s]\s*\d{2}:\d{2})\]?\s*-\s*([^:]+):\s*(.*)$/;
 
     const fileInput = document.getElementById('fileInput');
@@ -157,11 +158,24 @@
         let results = {};
         let currentChallenge = null;
         let lastMsgTs = "Nenhuma mensagem encontrada";
-        
+
         let currentMsg = { text: "", ts: "", sender: "", raw: [] };
 
         function flushMessage() {
-            if (!currentMsg.text || !currentChallenge) return;
+            if (!currentMsg.text) return;
+
+            // Verifica troca de desafio (Geral vs Musical) pelo prefixo "M"
+            let itemMatch;
+            ITEM_PATTERN.lastIndex = 0;
+            while ((itemMatch = ITEM_PATTERN.exec(currentMsg.text)) !== null) {
+                const prefix = itemMatch[1].toUpperCase();
+                currentChallenge = (prefix === 'M') ? "DESAFIO MUSICAL" : "DESAFIO DO GUGU GERAL";
+                if (!results[currentChallenge]) {
+                    results[currentChallenge] = { azul: 0, amarelo: 0 };
+                }
+            }
+
+            if (!currentChallenge) return;
 
             // Busca pontos
             let pointsMatch;
